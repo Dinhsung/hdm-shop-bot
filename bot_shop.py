@@ -9,6 +9,8 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8962422980:AAERSCHiswb_rb6PzRSZ094EVdwn
 ADMIN_ID = 6780308119
 TELEGRAM_SUPPORT = '@spmxhhdm'
 BANK_INFO = {'bank': 'TPBank', 'account': '10005490787', 'owner': 'DO HAI DANG'}
+BOT_USERNAME = 'hdm_shop_bot'  # ⚠️ ĐỔI thành username bot thật của bạn (không có @)
+REF_BONUS = 400  # Số tiền cộng cho mỗi người đăng ký qua link
 DB_FILE = 'shop_data.json'
 
 def esc(s):
@@ -21,7 +23,14 @@ def load_db():
             json.dump({'products': {}, 'inventory': {}, 'pending': {}, 'orders': [], 'users': {}, 'tips': []}, f, ensure_ascii=False, indent=2)
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            db = json.load(f)
+            db.setdefault('products', {})
+            db.setdefault('inventory', {})
+            db.setdefault('pending', {})
+            db.setdefault('orders', [])
+            db.setdefault('users', {})
+            db.setdefault('tips', [])
+            return db
     except:
         return {'products': {}, 'inventory': {}, 'pending': {}, 'orders': [], 'users': {}, 'tips': []}
 
@@ -38,6 +47,8 @@ try:
         BotCommand('help', '📖 Hướng dẫn'),
         BotCommand('shop', '🛒 Cửa hàng'),
         BotCommand('tips', '🎁 Mẹo Free'),
+        BotCommand('ref', '🔗 Giới thiệu +400đ'),
+        BotCommand('balance', '💵 Số dư'),
         BotCommand('support', '💬 Hỗ trợ'),
     ])
 except Exception as e:
@@ -53,6 +64,10 @@ def main_menu():
         types.InlineKeyboardButton('🎁 Mẹo Free', callback_data='cat_tips'),
         types.InlineKeyboardButton('💬 Hỗ trợ', url=f'https://t.me/{TELEGRAM_SUPPORT[1:]}')
     )
+    markup.add(
+        types.InlineKeyboardButton(f'🔗 Giới thiệu +{REF_BONUS}đ', callback_data='show_ref'),
+        types.InlineKeyboardButton('💵 Số dư', callback_data='show_balance')
+    )
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -60,12 +75,49 @@ def cmd_start(msg):
     chat_id = msg.chat.id
     name = msg.from_user.first_name or 'bạn'
     db = load_db()
-    if str(chat_id) not in db['users']:
-        db['users'][str(chat_id)] = {'name': name, 'joined': datetime.now().isoformat()}
+    uid = str(chat_id)
+
+    # Xử lý referral: /start ref_<id>
+    args = msg.text.split()
+    ref_by = None
+    if len(args) > 1 and args[1].startswith('ref_'):
+        ref_by = args[1].replace('ref_', '').strip()
+
+    is_new = uid not in db['users']
+
+    if is_new:
+        db['users'][uid] = {
+            'name': name,
+            'joined': datetime.now().isoformat(),
+            'balance': 0,
+            'referred_by': ref_by if ref_by else None
+        }
+
+        # Cộng tiền cho người giới thiệu (mỗi người +400đ)
+        if ref_by and ref_by != uid and ref_by in db['users']:
+            db['users'][ref_by]['balance'] = db['users'][ref_by].get('balance', 0) + REF_BONUS
+            new_balance = db['users'][ref_by]['balance']
+            # Đếm tổng số người đã giới thiệu
+            total_ref = sum(1 for u in db['users'].values() if u.get('referred_by') == ref_by)
+            try:
+                bot.send_message(
+                    int(ref_by),
+                    f"🎉 <b>CHÚC MỪNG!</b>\n\n"
+                    f"👤 <b>{esc(name)}</b> đã tham gia qua link của bạn!\n"
+                    f"💰 Bạn được cộng <b>+{REF_BONUS:,}đ</b>\n"
+                    f"👥 Tổng đã giới thiệu: <b>{total_ref}</b> người\n"
+                    f"💵 Số dư hiện tại: <b>{new_balance:,}đ</b>",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                print(f"Noti ref error: {e}")
+
         save_db(db)
+
     if not db['products']:
         bot.send_message(chat_id, f"👋 Chào <b>{esc(name)}</b>!\n\n🏪 <b>HDM SHOP</b>\n⏳ Shop đang cập nhật sản phẩm...", parse_mode='HTML')
         return
+
     bot.send_message(
         chat_id,
         f"👋 Chào <b>{esc(name)}</b>!\n\n"
@@ -85,6 +137,11 @@ def cmd_help(msg):
         "2️⃣ Bot hiện STK + mã đơn\n"
         "3️⃣ Chuyển ĐÚNG số tiền + ĐÚNG nội dung\n"
         "4️⃣ Bot tự động gửi hàng\n\n"
+        "🎁 <b>GIỚI THIỆU BẠN BÈ</b>\n"
+        f"• Mỗi người mới qua link → <b>+{REF_BONUS:,}đ</b>\n"
+        "• Càng nhiều người → càng nhiều tiền\n"
+        "• Gõ /ref để lấy link giới thiệu\n"
+        "• Gõ /balance để xem số dư\n\n"
         f"💬 Hỗ trợ: {esc(TELEGRAM_SUPPORT)}",
         parse_mode='HTML'
     )
@@ -107,6 +164,92 @@ def cmd_support(msg):
             types.InlineKeyboardButton('💬 Nhắn Admin', url=f'https://t.me/{TELEGRAM_SUPPORT[1:]}')
         )
     )
+
+@bot.message_handler(commands=['ref'])
+def cmd_ref(msg):
+    chat_id = msg.chat.id
+    db = load_db()
+    uid = str(chat_id)
+    if uid not in db['users']:
+        bot.send_message(chat_id, "⚠️ Bạn chưa đăng ký. Gõ /start trước!")
+        return
+    ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
+    balance = db['users'][uid].get('balance', 0)
+    count = sum(1 for u in db['users'].values() if u.get('referred_by') == uid)
+    bot.send_message(
+        chat_id,
+        f"🎁 <b>GIỚI THIỆU BẠN BÈ</b>\n\n"
+        f"🔗 Link của bạn:\n<code>{ref_link}</code>\n\n"
+        f"💰 Mỗi người mới tham gia qua link → <b>+{REF_BONUS:,}đ</b>\n"
+        f"👥 Đã giới thiệu: <b>{count}</b> người\n"
+        f"💵 Số dư: <b>{balance:,}đ</b>\n\n"
+        f"📌 Chia sẻ link cho bạn bè ngay!",
+        parse_mode='HTML'
+    )
+
+@bot.message_handler(commands=['balance'])
+def cmd_balance(msg):
+    chat_id = msg.chat.id
+    db = load_db()
+    uid = str(chat_id)
+    if uid not in db['users']:
+        bot.send_message(chat_id, "⚠️ Bạn chưa đăng ký. Gõ /start trước!")
+        return
+    balance = db['users'][uid].get('balance', 0)
+    count = sum(1 for u in db['users'].values() if u.get('referred_by') == uid)
+    bot.send_message(
+        chat_id,
+        f"💵 <b>SỐ DƯ CỦA BẠN</b>\n\n"
+        f"💰 Số dư: <b>{balance:,}đ</b>\n"
+        f"👥 Đã giới thiệu: <b>{count}</b> người\n\n"
+        f"📌 Dùng /ref để lấy link giới thiệu!",
+        parse_mode='HTML'
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data == 'show_ref')
+def cb_show_ref(call):
+    db = load_db()
+    uid = str(call.from_user.id)
+    if uid not in db['users']:
+        bot.answer_callback_query(call.id, '⚠️ Gõ /start trước!')
+        return
+    ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
+    balance = db['users'][uid].get('balance', 0)
+    count = sum(1 for u in db['users'].values() if u.get('referred_by') == uid)
+    text = (
+        f"🎁 <b>GIỚI THIỆU BẠN BÈ</b>\n\n"
+        f"🔗 Link của bạn:\n<code>{ref_link}</code>\n\n"
+        f"💰 Mỗi người mới tham gia qua link → <b>+{REF_BONUS:,}đ</b>\n"
+        f"👥 Đã giới thiệu: <b>{count}</b> người\n"
+        f"💵 Số dư: <b>{balance:,}đ</b>\n\n"
+        f"📌 Chia sẻ link cho bạn bè ngay!"
+    )
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu'))
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
+    except Exception as e:
+        print(f"cb_show_ref error: {e}")
+
+@bot.callback_query_handler(func=lambda c: c.data == 'show_balance')
+def cb_show_balance(call):
+    db = load_db()
+    uid = str(call.from_user.id)
+    if uid not in db['users']:
+        bot.answer_callback_query(call.id, '⚠️ Gõ /start trước!')
+        return
+    balance = db['users'][uid].get('balance', 0)
+    count = sum(1 for u in db['users'].values() if u.get('referred_by') == uid)
+    text = (
+        f"💵 <b>SỐ DƯ CỦA BẠN</b>\n\n"
+        f"💰 Số dư: <b>{balance:,}đ</b>\n"
+        f"👥 Đã giới thiệu: <b>{count}</b> người\n\n"
+        f"📌 Dùng nút Giới thiệu để lấy link!"
+    )
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu'))
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
+    except Exception as e:
+        print(f"cb_show_balance error: {e}")
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('product_'))
 def show_product(call):
@@ -157,7 +300,6 @@ def buy_product(call):
     }
     save_db(db)
 
-    # ==== QR SEPAY (TPBank) ====
     qr_url = (
         f"https://qr.sepay.vn/img"
         f"?acc={BANK_INFO['account']}"
@@ -416,6 +558,7 @@ def admin_panel(msg):
         return
     db = load_db()
     total = sum(o['price'] for o in db['orders'] if o['status'] == 'completed')
+    total_balance = sum(u.get('balance', 0) for u in db['users'].values())
     bot.send_message(
         ADMIN_ID,
         f"👑 <b>ADMIN PANEL</b>\n\n"
@@ -423,14 +566,19 @@ def admin_panel(msg):
         f"🛍 SP: {len(db['products'])}\n"
         f"✅ Đơn xong: {len(db['orders'])}\n"
         f"⏳ Chờ: {len(db['pending'])}\n"
-        f"💰 Doanh thu: <b>{total:,}đ</b>\n\n"
+        f"💰 Doanh thu: <b>{total:,}đ</b>\n"
+        f"💵 Tổng số dư ref: <b>{total_balance:,}đ</b>\n\n"
         f"📌 <b>LỆNH:</b>\n"
         f"<code>/addproduct |pid|ten|gia|loai|mo_ta|link|</code>\n"
         f"<code>/setprice &lt;pid&gt; &lt;gia&gt;</code>\n"
         f"<code>/delproduct &lt;pid&gt;</code>\n"
+        f"<code>/delall confirm</code> - xoá tất cả SP\n"
         f"<code>/addacc &lt;pid&gt; &lt;acc&gt;</code>\n"
         f"<code>/addlist &lt;pid&gt;</code> + list\n"
         f"<code>/kho</code> hoặc <code>/kho &lt;pid&gt;</code>\n"
+        f"<code>/deltip</code> - xem DS mẹo\n"
+        f"<code>/deltip &lt;số&gt;</code> - xoá 1 mẹo\n"
+        f"<code>/deltip all confirm</code> - xoá tất cả mẹo\n"
         f"<code>/broadcast &lt;text&gt;</code>\n"
         f"<code>/stats</code>",
         parse_mode='HTML'
@@ -504,6 +652,84 @@ def admin_delproduct(msg):
             bot.send_message(ADMIN_ID, f"❌ Không tìm thấy <code>{esc(pid)}</code>", parse_mode='HTML')
     except:
         bot.send_message(ADMIN_ID, "📌 Dùng: <code>/delproduct &lt;pid&gt;</code>", parse_mode='HTML')
+
+@bot.message_handler(commands=['delall'])
+def admin_delall(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    parts = msg.text.split()
+    if len(parts) < 2 or parts[1] != 'confirm':
+        bot.send_message(
+            ADMIN_ID,
+            "⚠️ <b>CẢNH BÁO</b>\n\n"
+            "Lệnh này sẽ XOÁ TOÀN BỘ sản phẩm + kho hàng + đơn chờ.\n"
+            "Không thể hoàn tác!\n\n"
+            "Nếu chắc chắn, gõ:\n"
+            "<code>/delall confirm</code>",
+            parse_mode='HTML'
+        )
+        return
+    db = load_db()
+    n_prod = len(db['products'])
+    n_inv = sum(len(v) for v in db['inventory'].values())
+    n_pending = len(db['pending'])
+    db['products'] = {}
+    db['inventory'] = {}
+    db['pending'] = {}
+    save_db(db)
+    bot.send_message(
+        ADMIN_ID,
+        f"✅ <b>ĐÃ XOÁ TOÀN BỘ</b>\n\n"
+        f"🗑 Sản phẩm: {n_prod}\n"
+        f"🗑 Acc trong kho: {n_inv}\n"
+        f"🗑 Đơn chờ: {n_pending}\n\n"
+        f"⚠️ Đơn đã hoàn thành trong <code>orders</code> vẫn giữ nguyên.",
+        parse_mode='HTML'
+    )
+
+@bot.message_handler(commands=['deltip'])
+def admin_deltip(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    parts = msg.text.split()
+    if len(parts) < 2:
+        db = load_db()
+        tips = db.get('tips', [])
+        if not tips:
+            bot.send_message(ADMIN_ID, "📭 Không có mẹo nào để xoá!")
+            return
+        text = "📋 <b>DANH SÁCH MẸO</b>\n\n"
+        for i, tip in enumerate(tips):
+            text += f"{i}. {esc(tip['title'])}\n"
+        text += "\n📌 Xoá 1 mẹo: <code>/deltip &lt;số&gt;</code>\n"
+        text += "📌 Xoá tất cả: <code>/deltip all confirm</code>"
+        bot.send_message(ADMIN_ID, text, parse_mode='HTML')
+        return
+
+    if parts[1] == 'all':
+        if len(parts) < 3 or parts[2] != 'confirm':
+            bot.send_message(ADMIN_ID, "⚠️ Gõ <code>/deltip all confirm</code> để xoá TẤT CẢ mẹo.", parse_mode='HTML')
+            return
+        db = load_db()
+        n = len(db.get('tips', []))
+        db['tips'] = []
+        save_db(db)
+        bot.send_message(ADMIN_ID, f"✅ Đã xoá <b>{n}</b> mẹo!", parse_mode='HTML')
+        return
+
+    try:
+        idx = int(parts[1])
+        db = load_db()
+        tips = db.get('tips', [])
+        if idx < 0 or idx >= len(tips):
+            bot.send_message(ADMIN_ID, f"❌ Số không hợp lệ! Có {len(tips)} mẹo (0 → {len(tips)-1}).")
+            return
+        removed = tips.pop(idx)
+        db['tips'] = tips
+        save_db(db)
+        bot.send_message(ADMIN_ID, f"✅ Đã xoá mẹo: <b>{esc(removed['title'])}</b>", parse_mode='HTML')
+    except:
+        bot.send_message(ADMIN_ID, "📌 Dùng: <code>/deltip &lt;số&gt;</code> hoặc <code>/deltip all confirm</code>", parse_mode='HTML')
 
 @bot.message_handler(commands=['addacc'])
 def admin_addacc(msg):
@@ -633,7 +859,8 @@ def admin_stats(msg):
         sold = sum(1 for o in db['orders'] if o['product_id'] == pid and o['status'] == 'completed')
         text += f"🛍 <b>{esc(p['name'])}</b>\n   💰 {p['price']:,}đ | ✅ Bán: {sold} | 📦 Kho: {p['stock']}\n"
     total = sum(o['price'] for o in db['orders'] if o['status'] == 'completed')
-    text += f"\n💵 <b>TỔNG: {total:,}đ</b>\n👥 Users: {len(db['users'])}"
+    total_balance = sum(u.get('balance', 0) for u in db['users'].values())
+    text += f"\n💵 <b>TỔNG: {total:,}đ</b>\n👥 Users: {len(db['users'])}\n💰 Tổng số dư ref: <b>{total_balance:,}đ</b>"
     bot.send_message(ADMIN_ID, text, parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda c: c.data == 'back_menu')
@@ -657,5 +884,6 @@ if __name__ == '__main__':
     print("🏪 HDM SHOP BOT đang chạy...")
     print(f"👑 Admin: {ADMIN_ID}")
     print(f"🏦 Bank: {BANK_INFO['bank']} - {BANK_INFO['account']}")
+    print(f"🔗 Ref bonus: +{REF_BONUS}đ/người")
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)
