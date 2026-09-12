@@ -1,0 +1,26 @@
+{
+  "products": {
+    "spam_sms": {"name": "💥 Spam SMS", "price": 50000, "stock": 999, "type": "tool", "desc": "Tool spam SMS 50+ dịch vụ, dùng 1 lần", "delivery": "Link tool"},
+    "via_fb_tuimun": {"name": "📱 Túi mù Via FB 2k", "price": 2000, "stock": 100, "type": "account", "desc": "Via FB random K9-K12, không chọn được", "delivery": "Auto kho"},
+    "via_fb_k9_2fa": {"name": "🔐 Via FB K9-K12 2FA", "price": 10000, "stock": 50, "type": "account", "desc": "Via K9-K12 có 2FA + cookie", "delivery": "Auto kho"},
+    "clone_fb": {"name": "👥 Clone Facebook", "price": 15000, "stock": 30, "type": "account", "desc": "Clone FB reg 2020-2022", "delivery": "Auto kho"},
+    "tut_dame_ig": {"name": "📸 Tut Dame IG", "price": 30000, "stock": 999, "type": "tut", "desc": "Hướng dẫn dame Instagram", "delivery": "Google Drive"},
+    "tut_dame_fb": {"name": "📘 Tut Dame FB", "price": 30000, "stock": 999, "type": "tut", "desc": "Hướng dẫn dame Facebook", "delivery": "Google Drive"},
+    "tut_dame_tt_video": {"name": "🎬 Tut Dame Video TikTok", "price": 30000, "stock": 999, "type": "tut", "desc": "Hướng dẫn dame video TikTok", "delivery": "Google Drive"},
+    "tut_dame_tt_13t": {"name": "🎵 Tut Dame TikTok 13T", "price": 40000, "stock": 999, "type": "tut", "desc": "Hướng dẫn dame TikTok 13 tuổi", "delivery": "Google Drive"},
+    "form_dame_fb": {"name": "📋 Form Dame FB", "price": 25000, "stock": 999, "type": "tool", "desc": "Form báo cáo Facebook", "delivery": "File HTML"},
+    "tool_dame_fb": {"name": "🔧 Tool Dame FB", "price": 100000, "stock": 999, "type": "tool", "desc": "Tool auto dame Facebook", "delivery": "Link tool"},
+    "tool_dame_tt": {"name": "🔧 Tool Dame TikTok", "price": 100000, "stock": 999, "type": "tool", "desc": "Tool auto dame TikTok", "delivery": "Link tool"}
+  },
+  "inventory": {
+    "via_fb_tuimun": [],
+    "via_fb_k9_2fa": [],
+    "clone_fb": []
+  },
+  "pending": {},
+  "orders": [],
+  "users": {},
+  "tips": [
+    {"title": "Cách dame FB hiệu quả", "content": "Bước 1: Chọn nick uy tín...\nBước 2: Report đúng loại...\nBước 3: Kiên nhẫn", "author": "admin", "time": "12/09/2026 20:00"}
+  ]
+}
