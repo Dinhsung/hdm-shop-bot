@@ -6,7 +6,7 @@
 
 import telebot
 from telebot import types
-from telebot.types import BotCommand, MenuButtonCommands
+from telebot.types import BotCommand
 import json
 import os
 import random
@@ -15,7 +15,7 @@ from datetime import datetime
 from flask import Flask, request
 
 # ===== CẤU HÌNH =====
-BOT_TOKEN = '8962422980:AAERSCHiswb_rb6PzRSZ094EVdwnJQ0YPdw'
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8962422980:AAERSCHiswb_rb6PzRSZ094EVdwnJQ0YPdw')
 ADMIN_ID = 6780308119
 TELEGRAM_SUPPORT = '@spmxhhdm'
 BANK_INFO = {
@@ -50,7 +50,7 @@ def save_db(data):
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# ===== SET MENU =====
+# ===== SET MENU COMMANDS =====
 def set_bot_commands():
     try:
         commands = [
@@ -66,12 +66,11 @@ def set_bot_commands():
 
 set_bot_commands()
 
-# ===== MENU =====
+# ===== MENU CHÍNH =====
 def main_menu():
     db = load_db()
     markup = types.InlineKeyboardMarkup(row_width=2)
     
-    # Nhóm sản phẩm theo loại
     for pid, p in db['products'].items():
         stock = f"✅{p['stock']}" if p['stock'] > 0 else "❌Hết"
         markup.add(types.InlineKeyboardButton(
@@ -250,7 +249,7 @@ def user_paid(call):
         f"⚠️ Chuyển đúng số tiền mới được duyệt!",
         call.message.chat.id, call.message.message_id, parse_mode='Markdown')
 
-# ===== WEBHOOK SEPAY - CHECK CHÍNH XÁC SỐ TIỀN =====
+# ===== WEBHOOK SEPAY =====
 @app.route('/webhook/payment', methods=['POST'])
 def payment_webhook():
     try:
@@ -268,15 +267,12 @@ def payment_webhook():
         for order_code, order in list(db['pending'].items()):
             if order_code in description and order['status'] in ['awaiting_payment', 'verifying']:
                 
-                # ===== CHECK CHÍNH XÁC SỐ TIỀN =====
                 if amount == order['price']:
-                    # ĐÚNG SỐ TIỀN → GIAO HÀNG
                     auto_deliver(order_code, order)
                     matched = True
                     break
                     
                 elif amount > order['price']:
-                    # CHUYỂN DƯ → GIAO HÀNG + BÁO ADMIN
                     auto_deliver(order_code, order)
                     bot.send_message(ADMIN_ID,
                         f"⚠️ *CHUYỂN DƯ*\n\n"
@@ -289,7 +285,6 @@ def payment_webhook():
                     break
                     
                 elif amount < order['price']:
-                    # CHUYỂN THIẾU → KHÔNG GIAO
                     bot.send_message(order['chat_id'],
                         f"⚠️ *CHUYỂN THIẾU TIỀN*\n\n"
                         f"🆔 Đơn: `{order_code}`\n"
@@ -512,6 +507,10 @@ def admin_panel(msg):
         f"`/setprice <pid> <giá_mới>`\n\n"
         f"🔑 *Thêm acc:*\n"
         f"`/addacc <pid> <acc>`\n\n"
+        f"📋 *Thêm list acc:*\n"
+        f"`/addlist <pid>` + list acc\n\n"
+        f"📊 *Xem kho:*\n"
+        f"`/kho` hoặc `/kho <pid>`\n\n"
         f"📢 *Thông báo:*\n"
         f"`/broadcast <nội dung>`\n\n"
         f"📊 *Thống kê:*\n"
@@ -590,7 +589,6 @@ def admin_addproduct(msg):
 # ===== ĐỔI GIÁ =====
 @bot.message_handler(commands=['setprice'])
 def admin_setprice(msg):
-    """Admin đổi giá: /setprice <pid> <giá_mới>"""
     if msg.chat.id != ADMIN_ID:
         return
     try:
@@ -617,7 +615,6 @@ def admin_setprice(msg):
 # ===== XÓA SẢN PHẨM =====
 @bot.message_handler(commands=['delproduct'])
 def admin_delproduct(msg):
-    """Xóa SP: /delproduct <pid>"""
     if msg.chat.id != ADMIN_ID:
         return
     try:
@@ -637,10 +634,9 @@ def admin_delproduct(msg):
     except:
         bot.send_message(ADMIN_ID, "❌ Dùng: `/delproduct <pid>`", parse_mode='Markdown')
 
-# ===== THÊM ACC VÀO KHO =====
+# ===== THÊM ACC ĐƠN LẺ =====
 @bot.message_handler(commands=['addacc'])
 def admin_addacc(msg):
-    """Thêm acc: /addacc <pid> <acc_content>"""
     if msg.chat.id != ADMIN_ID:
         return
     try:
@@ -669,39 +665,151 @@ def admin_addacc(msg):
     except:
         bot.send_message(ADMIN_ID, "❌ Dùng: `/addacc <pid> <acc>`", parse_mode='Markdown')
 
+# ===== THÊM LIST ACC HÀNG LOẠT =====
+@bot.message_handler(commands=['addlist'])
+def admin_addlist(msg):
+    """
+    Thêm nhiều acc cùng lúc:
+    /addlist <pid>
+    <acc1>
+    <acc2>
+    <acc3>
+    
+    Format mỗi acc: tk|mk|năm|2fa|cookie
+    """
+    if msg.chat.id != ADMIN_ID:
+        return
+    
+    try:
+        lines = msg.text.split('\n')
+        
+        first_line = lines[0].strip()
+        parts = first_line.split()
+        
+        if len(parts) < 2:
+            bot.send_message(ADMIN_ID,
+                "❌ *CÁCH DÙNG:*\n\n"
+                "`/addlist <pid>`\n"
+                "`tk1|mk1|năm1|2fa1|cookie1`\n"
+                "`tk2|mk2|năm2|2fa2|cookie2`\n"
+                "`tk3|mk3|năm3|2fa3|cookie3`\n\n"
+                "*Ví dụ:*\n"
+                "`/addlist via_fb_2k`\n"
+                "`user1|pass1|2019|2FA123|cookie_abc`\n"
+                "`user2|pass2|2020|2FA456|cookie_xyz`",
+                parse_mode='Markdown')
+            return
+        
+        pid = parts[1].strip()
+        acc_lines = [line.strip() for line in lines[1:] if line.strip()]
+        
+        if not acc_lines:
+            bot.send_message(ADMIN_ID, "❌ Không có acc nào để thêm!")
+            return
+        
+        db = load_db()
+        if pid not in db['products']:
+            bot.send_message(ADMIN_ID, f"❌ SP `{pid}` không tồn tại!\nTạo SP trước: `/addproduct |{pid}|Tên SP|giá|account|mô_tả|`", parse_mode='Markdown')
+            return
+        
+        if pid not in db['inventory']:
+            db['inventory'][pid] = []
+        
+        added = 0
+        errors = []
+        
+        for i, acc_line in enumerate(acc_lines, 1):
+            try:
+                acc_parts = acc_line.split('|')
+                
+                if len(acc_parts) < 2:
+                    errors.append(f"Dòng {i}: Thiếu thông tin (cần ít nhất tk|mk)")
+                    continue
+                
+                tk = acc_parts[0].strip()
+                mk = acc_parts[1].strip() if len(acc_parts) > 1 else ''
+                nam = acc_parts[2].strip() if len(acc_parts) > 2 else ''
+                               fa2 = acc_parts[3].strip() if len(acc_parts) > 3 else ''
+                cookie = acc_parts[4].strip() if len(acc_parts) > 4 else ''
+                
+                acc_save = f"{tk}|{mk}|{nam}|{fa2}|{cookie}"
+                db['inventory'][pid].append(acc_save)
+                added += 1
+            except Exception as e:
+                errors.append(f"Dòng {i}: {str(e)}")
+        
+        db['products'][pid]['stock'] = len(db['inventory'][pid])
+        save_db(db)
+        
+        result_text = (
+            f"✅ *ĐÃ THÊM {added} ACC*\n\n"
+            f"📦 SP: *{db['products'][pid]['name']}*\n"
+            f"🆔 PID: `{pid}`\n"
+            f"📊 Tổng kho: *{db['products'][pid]['stock']}*\n"
+        )
+        
+        if errors:
+            result_text += f"\n⚠️ *LỖI {len(errors)} DÒNG:*\n"
+            for err in errors[:5]:
+                result_text += f"• {err}\n"
+            if len(errors) > 5:
+                result_text += f"... và {len(errors) - 5} lỗi khác"
+        
+        bot.send_message(ADMIN_ID, result_text, parse_mode='Markdown')
+    
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
+
 # ===== XEM KHO =====
 @bot.message_handler(commands=['kho'])
 def admin_kho(msg):
-    """Xem kho: /kho <pid>"""
+    """Xem kho: /kho hoặc /kho <pid>"""
     if msg.chat.id != ADMIN_ID:
         return
+    
     try:
         parts = msg.text.split()
         pid = parts[1] if len(parts) > 1 else None
         
         db = load_db()
+        
         if pid:
             if pid not in db['inventory']:
                 bot.send_message(ADMIN_ID, f"❌ Không có kho cho `{pid}`", parse_mode='Markdown')
                 return
+            
             inv = db['inventory'][pid]
             if not inv:
                 bot.send_message(ADMIN_ID, f"📭 Kho `{pid}` trống")
                 return
-            text = f"📦 *KHO: {pid}* ({len(inv)})\n\n"
-            for i, acc in enumerate(inv[:20], 1):
-                text += f"{i}. `{acc}`\n"
-            if len(inv) > 20:
-                text += f"\n... và {len(inv) - 20} acc khác"
+            
+            text = f"📦 *KHO: {pid}* ({len(inv)} acc)\n\n"
+            for i, acc in enumerate(inv[:30], 1):
+                acc_parts = acc.split('|')
+                tk = acc_parts[0] if len(acc_parts) > 0 else ''
+                nam = acc_parts[2] if len(acc_parts) > 2 else ''
+                has_2fa = '✅' if len(acc_parts) > 3 and acc_parts[3] else '❌'
+                has_cookie = '✅' if len(acc_parts) > 4 and acc_parts[4] else '❌'
+                text += f"{i}. `{tk}` | Năm: {nam} | 2FA: {has_2fa} | Cookie: {has_cookie}\n"
+            
+            if len(inv) > 30:
+                text += f"\n... và {len(inv) - 30} acc khác"
+            
             bot.send_message(ADMIN_ID, text, parse_mode='Markdown')
         else:
             text = "📦 *TẤT CẢ KHO*\n\n"
+            total = 0
             for pid, inv in db['inventory'].items():
                 name = db['products'].get(pid, {}).get('name', pid)
                 text += f"• {name}: *{len(inv)}* acc\n"
+                total += len(inv)
+            text += f"\n📊 *TỔNG: {total} acc*"
             bot.send_message(ADMIN_ID, text, parse_mode='Markdown')
-    except:
-        bot.send_message(ADMIN_ID, "❌ Dùng: `/kho` hoặc `/kho <pid>`", parse_mode='Markdown')
+    
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
 
 # ===== BROADCAST =====
 @bot.message_handler(commands=['broadcast'])
@@ -723,6 +831,7 @@ def admin_broadcast(msg):
             pass
     bot.send_message(ADMIN_ID, f"✅ Đã gửi đến *{success}/{len(users)}* user", parse_mode='Markdown')
 
+
 # ===== THỐNG KÊ =====
 @bot.message_handler(commands=['stats'])
 def admin_stats(msg):
@@ -740,6 +849,7 @@ def admin_stats(msg):
     text += f"\n👥 Users: {len(db['users'])}"
     bot.send_message(ADMIN_ID, text, parse_mode='Markdown')
 
+
 @bot.callback_query_handler(func=lambda c: c.data == 'back_menu')
 def back_menu(call):
     bot.edit_message_text(
@@ -747,9 +857,11 @@ def back_menu(call):
         call.message.chat.id, call.message.message_id,
         parse_mode='Markdown', reply_markup=main_menu())
 
+
 @bot.callback_query_handler(func=lambda c: c.data == 'cat_tips')
 def cat_tips_cb(call):
     show_tips(call)
+
 
 # ===== CHẠY BOT + WEBHOOK =====
 if __name__ == '__main__':
