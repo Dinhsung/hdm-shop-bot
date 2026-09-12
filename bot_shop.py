@@ -23,6 +23,9 @@ BOT_USERNAME = 'hdm_shop_bot'
 REF_BONUS = 400
 DB_FILE = 'shop_data.json'
 
+# Mã bảo mật cho route /backup (ĐỔI thành chuỗi riêng của bạn)
+BACKUP_SECRET = 'HDM_BACKUP_2025_SECRET'
+
 # ========== STATE ==========
 sms_waiting = {}              # {chat_id: {...}}
 nap_waiting = {}              # {chat_id: {...}}
@@ -103,7 +106,68 @@ try:
 except Exception as e:
     print(f"Set commands error: {e}")
 
-# ========== MENU ==========
+# ============================================================
+# ============== 🌐 ROUTES CHO CRON-JOB ==============
+# ============================================================
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Keep-alive — cron-job gọi mỗi 5 phút để bot không sleep"""
+    return {'status': 'ok', 'time': datetime.now().isoformat()}, 200
+
+@app.route('/', methods=['GET'])
+def home():
+    """Trang chủ — tránh 404 khi có ai vào URL gốc"""
+    return {
+        'status': 'HDM Shop Bot is running',
+        'time': datetime.now().isoformat(),
+        'endpoints': ['/ping', '/health', '/backup?secret=xxx', '/webhook/payment']
+    }, 200
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check chi tiết — kiểm tra bot, user, SP, đơn"""
+    try:
+        me = bot.get_me()
+        db = load_db()
+        return {
+            'status': 'ok',
+            'bot': me.username,
+            'sms_tool': SMS_TOOL_AVAILABLE,
+            'users': len(db['users']),
+            'products': len(db['products']),
+            'pending': len(db['pending']),
+            'orders': len(db['orders']),
+            'time': datetime.now().isoformat()
+        }, 200
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}, 500
+
+@app.route('/backup', methods=['GET'])
+def backup_data():
+    """Cron gọi 1 lần/ngày để bot tự gửi file data cho admin"""
+    try:
+        secret = request.args.get('secret', '')
+        if secret != BACKUP_SECRET:
+            return {'error': 'unauthorized'}, 401
+
+        if not os.path.exists(DB_FILE):
+            return {'error': 'no db file'}, 404
+
+        with open(DB_FILE, 'rb') as f:
+            bot.send_document(
+                ADMIN_ID, f,
+                caption=f"💾 <b>BACKUP TỰ ĐỘNG</b>\n\n📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                parse_mode='HTML'
+            )
+        return {'success': True, 'time': datetime.now().isoformat()}, 200
+    except Exception as e:
+        print(f'Backup error: {e}')
+        return {'error': str(e)}, 500
+
+# ============================================================
+# ============== MENU ==============
+# ============================================================
 def main_menu():
     db = load_db()
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -744,7 +808,6 @@ def send_content_to_user(chat_id, p, order_code, header):
     content_type = p.get('content_type', 'text')
     link = p.get('link', '')
 
-    # Chưa có nội dung / liên hệ admin
     if not link or content_type == 'contact':
         bot.send_message(
             chat_id,
@@ -770,7 +833,6 @@ def send_content_to_user(chat_id, p, order_code, header):
             pass
         return
 
-    # FILE
     if content_type == 'file' and p.get('file_id'):
         caption = (
             f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
@@ -787,7 +849,6 @@ def send_content_to_user(chat_id, p, order_code, header):
             print(f"Send file error: {e}")
             bot.send_message(chat_id, "❌ Lỗi gửi file. Liên hệ admin!")
 
-    # PHOTO
     if content_type == 'photo' and p.get('file_id'):
         caption = (
             f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
@@ -801,7 +862,6 @@ def send_content_to_user(chat_id, p, order_code, header):
         except Exception as e:
             print(f"Send photo error: {e}")
 
-    # VIDEO
     if content_type == 'video' and p.get('file_id'):
         try:
             bot.send_video(chat_id, p['file_id'], caption=header, parse_mode='HTML')
@@ -809,7 +869,6 @@ def send_content_to_user(chat_id, p, order_code, header):
         except Exception as e:
             print(f"Send video error: {e}")
 
-    # AUDIO
     if content_type == 'audio' and p.get('file_id'):
         try:
             bot.send_audio(chat_id, p['file_id'], caption=header, parse_mode='HTML')
@@ -817,7 +876,6 @@ def send_content_to_user(chat_id, p, order_code, header):
         except Exception as e:
             print(f"Send audio error: {e}")
 
-    # TEXT/LINK mặc định
     bot.send_message(
         chat_id,
         f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
@@ -1152,9 +1210,28 @@ def admin_panel(msg):
         f"📌 <b>KHÁC:</b>\n"
         f"<code>/deltip</code>\n"
         f"<code>/broadcast &lt;text&gt;</code>\n"
-        f"<code>/stats</code>",
+        f"<code>/stats</code>\n"
+        f"<code>/backup_now</code> — backup data ngay",
         parse_mode='HTML'
     )
+
+# ========== BACKUP NOW (ADMIN) ==========
+@bot.message_handler(commands=['backup_now'])
+def admin_backup_now(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    try:
+        if not os.path.exists(DB_FILE):
+            bot.send_message(ADMIN_ID, "❌ Chưa có file data!")
+            return
+        with open(DB_FILE, 'rb') as f:
+            bot.send_document(
+                ADMIN_ID, f,
+                caption=f"💾 <b>BACKUP THỦ CÔNG</b>\n\n📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
 
 # ========== ADD PRODUCT ==========
 @bot.message_handler(commands=['addproduct'])
@@ -1996,5 +2073,6 @@ if __name__ == '__main__':
     print(f"🏦 Bank: {BANK_INFO['bank']} - {BANK_INFO['account']}")
     print(f"🔗 Ref bonus: +{REF_BONUS}đ")
     print(f"📱 Tool SMS: {'✅ ONLINE' if SMS_TOOL_AVAILABLE else '❌ OFFLINE'}")
+    print(f"🌐 Routes: /ping, /health, /backup?secret=..., /webhook/payment")
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)
