@@ -186,7 +186,6 @@ def buy_product(call):
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
     )
 
-    # Xoá tin nhắn cũ, gửi ảnh QR kèm caption
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception as e:
@@ -195,7 +194,6 @@ def buy_product(call):
     try:
         bot.send_photo(call.message.chat.id, qr_url, caption=caption, parse_mode='HTML', reply_markup=markup)
     except Exception as e:
-        # Nếu gửi ảnh lỗi, fallback gửi text
         print(f"Send photo error: {e}")
         bot.send_message(call.message.chat.id, caption, parse_mode='HTML', reply_markup=markup)
 
@@ -270,8 +268,7 @@ def auto_deliver(order_code, order):
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
                 f"🔑 <b>TÀI KHOẢN:</b>\n<code>{esc(acc)}</code>\n\n"
-                f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b> 🍀🍀🍀\n"
-                f"hẹn gặp lại! 🎉",
+                f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b>🍀🍀🍀",
                 parse_mode='HTML'
             )
         elif p['type'] == 'tool':
@@ -280,7 +277,8 @@ def auto_deliver(order_code, order):
                 f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
-                f"🔗 Link tool:\n{p.get('link', 'https://github.com/hdm-shop/tools')}",
+                f"🔗 Link tool:\n{p.get('link', 'https://github.com/hdm-shop/tools')}\n\n"
+                f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b>🍀🍀🍀",
                 parse_mode='HTML'
             )
         elif p['type'] == 'tut':
@@ -289,7 +287,8 @@ def auto_deliver(order_code, order):
                 f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
-                f"🔗 Link tài liệu:\n{p.get('link', 'https://drive.google.com/hdm-tuts')}",
+                f"🔗 Link tài liệu:\n{p.get('link', 'https://drive.google.com/hdm-tuts')}\n\n"
+                f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b>🍀🍀🍀",
                 parse_mode='HTML'
             )
         order['status'] = 'completed'
