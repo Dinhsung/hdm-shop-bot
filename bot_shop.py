@@ -63,21 +63,29 @@ app = Flask(__name__)
 
 # ===== SET MENU =====
 def set_bot_commands():
-    commands = [
-        BotCommand('start', '🏠 Menu chính'),
-        BotCommand('help', '📖 Hướng dẫn'),
-        BotCommand('shop', '🛒 Cửa hàng'),
-        BotCommand('spamsms', '💥 Spam SMS'),
-        BotCommand('via', '📱 Via/Clone FB'),
-        BotCommand('tut', '📚 Tut Dame'),
-        BotCommand('tool', '🔧 Tool Dame'),
-        BotCommand('tips', '💡 Mẹo Free'),
-        BotCommand('support', '📞 Hỗ trợ'),
-    ]
-    bot.set_my_commands(commands)
+    try:
+        commands = [
+            BotCommand('start', '🏠 Menu chính'),
+            BotCommand('help', '📖 Hướng dẫn'),
+            BotCommand('shop', '🛒 Cửa hàng'),
+            BotCommand('spamsms', '💥 Spam SMS'),
+            BotCommand('via', '📱 Via/Clone FB'),
+            BotCommand('tut', '📚 Tut Dame'),
+            BotCommand('tool', '🔧 Tool Dame'),
+            BotCommand('tips', '💡 Mẹo Free'),
+            BotCommand('support', '📞 Hỗ trợ'),
+        ]
+        bot.set_my_commands(commands)
+    except Exception as e:
+        print(f"Set commands error: {e}")
 
 def set_menu_button():
-    bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    try:
+        # Thử với type='commands' (cho version mới)
+        bot.set_chat_menu_button(menu_button=MenuButtonCommands(type='commands'))
+    except Exception as e:
+        print(f"Menu button error (skip): {e}")
+        pass
 
 set_bot_commands()
 set_menu_button()
