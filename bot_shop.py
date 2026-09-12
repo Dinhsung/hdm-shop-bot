@@ -270,7 +270,8 @@ def auto_deliver(order_code, order):
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
                 f"🔑 <b>TÀI KHOẢN:</b>\n<code>{esc(acc)}</code>\n\n"
-                f"⚠️ Đổi pass ngay!",
+                f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b> 🍀🍀🍀\n"
+                f"hẹn gặp lại! 🎉",
                 parse_mode='HTML'
             )
         elif p['type'] == 'tool':
