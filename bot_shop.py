@@ -15,7 +15,7 @@ from datetime import datetime
 from flask import Flask, request
 
 # ===== CẤU HÌNH =====
-BOT_TOKEN = '8962422980:AAGco6lrf1kytlAGCdpoNeQylUL-qbFwaQM'
+BOT_TOKEN = '8962422980:AAERSCHiswb_rb6PzRSZ094EVdwnJQ0YPdw'
 ADMIN_ID = 6780308119
 TELEGRAM_SUPPORT = '@spmxhhdm'
 BANK_INFO = {
