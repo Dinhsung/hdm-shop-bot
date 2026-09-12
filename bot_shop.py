@@ -12,7 +12,7 @@ try:
     print("[OK] Đã load sms_tool.py")
 except ImportError as e:
     SMS_TOOL_AVAILABLE = False
-    print(f"[WARN] Không tìm thấy sms_tool.py — tính năng spam SMS sẽ bị tắt ({e})")
+    print(f"[WARN] Không tìm thấy sms_tool.py — spam SMS sẽ tắt ({e})")
 
 # ========== CẤU HÌNH ==========
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8962422980:AAERSCHiswb_rb6PzRSZ094EVdwnJQ0YPdw')
@@ -67,6 +67,30 @@ def find_user_id(query):
             return uid
     return None
 
+def is_infinite(p):
+    """Kiểm tra SP có phải loại vô hạn (tut/tool/tool_sms)"""
+    return p.get('type') in ['tut', 'tool', 'tool_sms']
+
+def stock_text(p):
+    """Trả về chuỗi hiển thị stock"""
+    if p.get('type') == 'account':
+        s = p.get('stock', 0)
+        return f"[Còn {s}]" if s > 0 else "[Hết]"
+    return "[∞]"
+
+def stock_text_full(p):
+    """Chuỗi hiển thị stock đầy đủ"""
+    if p.get('type') == 'account':
+        s = p.get('stock', 0)
+        return f"✅ Còn {s} acc" if s > 0 else "❌ Hết hàng"
+    return "♾ Vô hạn (mua bao nhiêu cũng được)"
+
+def can_buy(p, balance=0):
+    """Kiểm tra SP có thể mua không"""
+    if p.get('type') == 'account':
+        return p.get('stock', 0) > 0 and balance >= p['price']
+    return balance >= p['price']
+
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
@@ -91,8 +115,10 @@ def main_menu():
     db = load_db()
     markup = types.InlineKeyboardMarkup(row_width=2)
     for pid, p in db['products'].items():
-        stock = f"[Còn {p['stock']}]" if p['stock'] > 0 else "[Hết]"
-        markup.add(types.InlineKeyboardButton(f"🛒 {p['name']} - {p['price']:,}đ {stock}", callback_data=f'product_{pid}'))
+        markup.add(types.InlineKeyboardButton(
+            f"🛒 {p['name']} - {p['price']:,}đ {stock_text(p)}",
+            callback_data=f'product_{pid}'
+        ))
     markup.add(
         types.InlineKeyboardButton('💰 Nạp tiền', callback_data='nap_tien'),
         types.InlineKeyboardButton('💵 Số dư', callback_data='show_balance')
@@ -129,7 +155,6 @@ def cmd_start(msg):
             'balance': 0,
             'referred_by': ref_by if ref_by else None
         }
-
         if ref_by and ref_by != uid and ref_by in db['users']:
             db['users'][ref_by]['balance'] = db['users'][ref_by].get('balance', 0) + REF_BONUS
             new_balance = db['users'][ref_by]['balance']
@@ -146,11 +171,10 @@ def cmd_start(msg):
                 )
             except Exception as e:
                 print(f"Noti ref error: {e}")
-
         save_db(db)
 
     if not db['products']:
-        bot.send_message(chat_id, f"👋 Chào <b>{esc(name)}</b>!\n\n🏪 <b>HDM SHOP</b>\n⏳ Shop đang cập nhật sản phẩm...", parse_mode='HTML')
+        bot.send_message(chat_id, f"👋 Chào <b>{esc(name)}</b>!\n\n🏪 <b>HDM SHOP</b>\n⏳ Shop đang cập nhật...", parse_mode='HTML')
         return
 
     balance = db['users'][uid].get('balance', 0)
@@ -171,7 +195,7 @@ def cmd_help(msg):
     bot.send_message(
         msg.chat.id,
         "📖 <b>HƯỚNG DẪN</b>\n\n"
-        "1️⃣ <b>Nạp tiền:</b> Bấm 💰 Nạp tiền → nhập số tiền → CK\n"
+        "1️⃣ <b>Nạp tiền:</b> Bấm 💰 Nạp tiền → nhập số → CK\n"
         "2️⃣ <b>Mua hàng:</b> Bấm SP → MUA BẰNG SỐ DƯ\n"
         "3️⃣ <b>Nhận hàng:</b> Bot gửi ngay lập tức\n\n"
         "🎁 <b>GIỚI THIỆU BẠN BÈ</b>\n"
@@ -250,7 +274,7 @@ def cmd_balance(msg):
         parse_mode='HTML'
     )
 
-# ========== NAP TIỀN ==========
+# ========== NẠP TIỀN ==========
 @bot.message_handler(commands=['nap'])
 def cmd_nap(msg):
     chat_id = msg.chat.id
@@ -267,12 +291,7 @@ def cmd_nap(msg):
         types.InlineKeyboardButton('✏️ Nhập số khác', callback_data='nap_custom'),
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
     )
-    bot.send_message(
-        chat_id,
-        f"💰 <b>NẠP TIỀN VÀO VÍ</b>\n\n👇 Chọn số tiền muốn nạp:",
-        parse_mode='HTML',
-        reply_markup=markup
-    )
+    bot.send_message(chat_id, "💰 <b>NẠP TIỀN VÀO VÍ</b>\n\n👇 Chọn số tiền muốn nạp:", parse_mode='HTML', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data == 'nap_tien')
 def cb_nap_tien(call):
@@ -290,11 +309,7 @@ def cb_nap_tien(call):
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
     )
     try:
-        bot.edit_message_text(
-            f"💰 <b>NẠP TIỀN VÀO VÍ</b>\n\n👇 Chọn số tiền muốn nạp:",
-            call.message.chat.id, call.message.message_id,
-            parse_mode='HTML', reply_markup=markup
-        )
+        bot.edit_message_text("💰 <b>NẠP TIỀN VÀO VÍ</b>\n\n👇 Chọn số tiền muốn nạp:", call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
     except Exception as e:
         print(f"nap_tien error: {e}")
 
@@ -344,7 +359,6 @@ def create_nap_qr(chat_id, amount, send_chat_id, edit_message_id=None):
     if uid not in db['users']:
         bot.send_message(send_chat_id, "⚠️ Gõ /start trước!")
         return
-
     nap_code = 'NAP' + ''.join(random.choices(string.digits, k=6))
     db['pending'][nap_code] = {
         'chat_id': chat_id,
@@ -355,7 +369,6 @@ def create_nap_qr(chat_id, amount, send_chat_id, edit_message_id=None):
         'time': datetime.now().isoformat()
     }
     save_db(db)
-
     qr_url = (
         f"https://qr.sepay.vn/img"
         f"?acc={BANK_INFO['account']}"
@@ -363,13 +376,12 @@ def create_nap_qr(chat_id, amount, send_chat_id, edit_message_id=None):
         f"&amount={amount}"
         f"&des={nap_code}"
     )
-
     caption = (
         f"💰 <b>NẠP TIỀN VÀO VÍ</b>\n\n"
         f"💵 Số tiền: <b>{amount:,}đ</b>\n"
         f"🔖 Mã nạp: <code>{nap_code}</code>\n\n"
         f"🏦 <b>THÔNG TIN CK</b>\n"
-        f"Ngân hàng: <b>{esc(BANK_INFO['bank'])}</b>\n"
+        f"NH: <b>{esc(BANK_INFO['bank'])}</b>\n"
         f"STK: <code>{BANK_INFO['account']}</code>\n"
         f"Chủ TK: {esc(BANK_INFO['owner'])}\n"
         f"Số tiền: <b>{amount:,}đ</b>\n"
@@ -377,19 +389,16 @@ def create_nap_qr(chat_id, amount, send_chat_id, edit_message_id=None):
         f"⚠️ <b>CHUYỂN ĐÚNG SỐ TIỀN + ĐÚNG NỘI DUNG</b>\n"
         f"Bot tự cộng tiền sau 1-2 phút."
     )
-
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton('✅ Tôi đã CK', callback_data=f'napcheck_{nap_code}'),
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
     )
-
     if edit_message_id:
         try:
             bot.delete_message(send_chat_id, edit_message_id)
         except:
             pass
-
     try:
         bot.send_photo(send_chat_id, qr_url, caption=caption, parse_mode='HTML', reply_markup=markup)
     except Exception as e:
@@ -410,14 +419,14 @@ def cb_napcheck(call):
         f"⏳ <b>ĐANG XÁC MINH</b>\n\n"
         f"🔖 Mã nạp: <code>{nap_code}</code>\n"
         f"💵 Số tiền: {order['amount']:,}đ\n\n"
-        f"🔍 Bot đang kiểm tra giao dịch..."
+        f"🔍 Bot đang kiểm tra..."
     )
     try:
         bot.edit_message_caption(text, call.message.chat.id, call.message.message_id, parse_mode='HTML')
     except:
         pass
 
-# ========== CALLBACK: SHOW REF ==========
+# ========== REF CALLBACK ==========
 @bot.callback_query_handler(func=lambda c: c.data == 'show_ref')
 def cb_show_ref(call):
     db = load_db()
@@ -441,7 +450,7 @@ def cb_show_ref(call):
     except Exception as e:
         print(f"cb_show_ref error: {e}")
 
-# ========== CALLBACK: SHOW BALANCE ==========
+# ========== BALANCE CALLBACK ==========
 @bot.callback_query_handler(func=lambda c: c.data == 'show_balance')
 def cb_show_balance(call):
     db = load_db()
@@ -481,22 +490,18 @@ def show_history(user_id, chat_id, message_id):
     db = load_db()
     my_orders = [o for o in db['orders'] if str(o.get('chat_id')) == uid]
     my_naps = [n for n in db.get('nap_history', []) if str(n.get('chat_id')) == uid]
-
     text = f"📜 <b>LỊCH SỬ GIAO DỊCH</b>\n\n"
     text += f"🛒 <b>Mua hàng ({len(my_orders)}):</b>\n"
     for o in my_orders[-10:][::-1]:
-        text += f"• {esc(o['product_name'])} - {o['price']:,}đ\n"
+        text += f"• {esc(o.get('product_name', 'N/A'))} - {o.get('price', 0):,}đ\n"
     if not my_orders:
         text += "• Chưa có\n"
-
     text += f"\n💰 <b>Nạp tiền ({len(my_naps)}):</b>\n"
     for n in my_naps[-10:][::-1]:
-        text += f"• +{n['amount']:,}đ - {n['time'][:10]}\n"
+        text += f"• +{n.get('amount', 0):,}đ - {n.get('time', '')[:10]}\n"
     if not my_naps:
         text += "• Chưa có\n"
-
     markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu'))
-
     if chat_id and message_id:
         try:
             bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
@@ -514,7 +519,6 @@ def show_product(call):
         bot.answer_callback_query(call.id, '❌ SP không tồn tại!')
         return
     p = db['products'][pid]
-    stock = f"✅ Còn {p['stock']}" if p['stock'] > 0 else "❌ Hết hàng"
     uid = str(call.from_user.id)
     balance = db['users'].get(uid, {}).get('balance', 0)
 
@@ -522,15 +526,13 @@ def show_product(call):
         f"🛍 <b>{esc(p['name'])}</b>\n\n"
         f"📝 {esc(p['desc'])}\n"
         f"💰 Giá: <b>{p['price']:,}đ</b>\n"
-        f"📦 Kho: {stock}\n"
+        f"📦 Kho: {stock_text_full(p)}\n"
         f"💵 Số dư của bạn: <b>{balance:,}đ</b>\n\n"
         f"👇 Chọn cách thanh toán:"
     )
     markup = types.InlineKeyboardMarkup(row_width=2)
-
-    if balance >= p['price'] and p['stock'] > 0:
+    if can_buy(p, balance):
         markup.add(types.InlineKeyboardButton('💵 MUA BẰNG SỐ DƯ', callback_data=f'buywallet_{pid}'))
-
     markup.add(
         types.InlineKeyboardButton('💳 MUA QUA QR', callback_data=f'buy_{pid}'),
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
@@ -546,30 +548,24 @@ def buy_with_wallet(call):
     pid = call.data.replace('buywallet_', '')
     uid = str(call.from_user.id)
     db = load_db()
-
     if pid not in db['products']:
         bot.answer_callback_query(call.id, '❌ SP không tồn tại!')
         return
-
     p = db['products'][pid]
-    if p['stock'] <= 0:
+    if p['type'] == 'account' and p.get('stock', 0) <= 0:
         bot.answer_callback_query(call.id, '❌ Hết hàng!')
         return
-
     if uid not in db['users']:
         bot.answer_callback_query(call.id, '⚠️ Gõ /start trước!')
         return
-
     balance = db['users'][uid].get('balance', 0)
     if balance < p['price']:
         bot.answer_callback_query(call.id, f'❌ Thiếu {p["price"] - balance:,}đ!')
         return
 
-    # Trừ tiền
     db['users'][uid]['balance'] = balance - p['price']
     new_balance = db['users'][uid]['balance']
 
-    # Tạo đơn hàng đã thanh toán
     order_code = 'HDM' + ''.join(random.choices(string.digits, k=6))
     order = {
         'chat_id': call.from_user.id,
@@ -599,10 +595,9 @@ def buy_with_wallet(call):
         f"⏳ Đang giao hàng...",
         parse_mode='HTML'
     )
-
     auto_deliver(order_code, order)
 
-# ========== CALLBACK: BUY QR ==========
+# ========== MUA QUA QR ==========
 @bot.callback_query_handler(func=lambda c: c.data.startswith('buy_'))
 def buy_product(call):
     pid = call.data.replace('buy_', '')
@@ -610,7 +605,7 @@ def buy_product(call):
     if pid not in db['products']:
         return
     p = db['products'][pid]
-    if p['stock'] <= 0:
+    if p['type'] == 'account' and p.get('stock', 0) <= 0:
         bot.answer_callback_query(call.id, '❌ Hết hàng!')
         return
 
@@ -633,7 +628,6 @@ def buy_product(call):
         f"&amount={p['price']}"
         f"&des={order_code}"
     )
-
     caption = (
         f"🧾 <b>ĐƠN HÀNG</b>\n\n"
         f"🛍 SP: <b>{esc(p['name'])}</b>\n"
@@ -647,25 +641,22 @@ def buy_product(call):
         f"Tiền: <b>{p['price']:,}đ</b>\n\n"
         f"⚠️ <b>ĐÚNG SỐ TIỀN + ĐÚNG NỘI DUNG</b>"
     )
-
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton('✅ Tôi đã CK', callback_data=f'paid_{order_code}'),
         types.InlineKeyboardButton('⬅️ Quay lại', callback_data='back_menu')
     )
-
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception as e:
         print(f"Delete error: {e}")
-
     try:
         bot.send_photo(call.message.chat.id, qr_url, caption=caption, parse_mode='HTML', reply_markup=markup)
     except Exception as e:
         print(f"Send photo error: {e}")
         bot.send_message(call.message.chat.id, caption, parse_mode='HTML', reply_markup=markup)
 
-# ========== CALLBACK: USER PAID ==========
+# ========== USER PAID ==========
 @bot.callback_query_handler(func=lambda c: c.data.startswith('paid_'))
 def user_paid(call):
     order_code = call.data.replace('paid_', '')
@@ -698,12 +689,10 @@ def payment_webhook():
         amount = data.get('transferAmount', 0) or data.get('amount', 0)
         description = data.get('content', '') or data.get('description', '')
         print(f"Số tiền: {amount}, Nội dung: {description}")
-
         db = load_db()
         for order_code, order in list(db['pending'].items()):
             if order_code in description and order['status'] in ['awaiting_payment', 'verifying']:
-
-                # === NẠP TIỀN ===
+                # NẠP TIỀN
                 if order.get('type') == 'nap_tien':
                     if amount >= order['amount']:
                         uid = str(order['chat_id'])
@@ -711,17 +700,14 @@ def payment_webhook():
                             old_bal = db['users'][uid].get('balance', 0)
                             db['users'][uid]['balance'] = old_bal + amount
                             new_bal = db['users'][uid]['balance']
-
                             db.setdefault('nap_history', []).append({
                                 'chat_id': order['chat_id'],
                                 'amount': amount,
                                 'code': order_code,
                                 'time': datetime.now().isoformat()
                             })
-
                             del db['pending'][order_code]
                             save_db(db)
-
                             try:
                                 bot.send_message(
                                     order['chat_id'],
@@ -734,15 +720,7 @@ def payment_webhook():
                                 )
                             except Exception as e:
                                 print(f"Noti user error: {e}")
-
-                            bot.send_message(
-                                ADMIN_ID,
-                                f"💰 <b>USER NẠP TIỀN</b>\n\n"
-                                f"👤 @{order['username']}\n"
-                                f"💵 +{amount:,}đ\n"
-                                f"🔖 {order_code}",
-                                parse_mode='HTML'
-                            )
+                            bot.send_message(ADMIN_ID, f"💰 <b>USER NẠP TIỀN</b>\n\n👤 @{order['username']}\n💵 +{amount:,}đ\n🔖 {order_code}", parse_mode='HTML')
                         break
                     else:
                         bot.send_message(
@@ -755,8 +733,7 @@ def payment_webhook():
                             parse_mode='HTML'
                         )
                         break
-
-                # === MUA HÀNG ===
+                # MUA HÀNG
                 else:
                     if amount == order['price']:
                         auto_deliver(order_code, order)
@@ -769,7 +746,6 @@ def payment_webhook():
                         bot.send_message(order['chat_id'], f"⚠️ <b>CHUYỂN THIẾU</b>\n\n🔖 {order_code}\n💰 Giá: {order['price']:,}đ\n📥 Đã CK: {amount:,}đ\n❗ Thiếu: <b>{order['price'] - amount:,}đ</b>", parse_mode='HTML')
                         bot.send_message(ADMIN_ID, f"⚠️ CHUYỂN THIẾU\nĐơn: {order_code}\nThiếu: {order['price'] - amount:,}đ")
                         break
-
         return {'success': True}
     except Exception as e:
         print(f'Webhook error: {e}')
@@ -806,7 +782,7 @@ def auto_deliver(order_code, order):
                 f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
-                f"🔗 Link tool:\n{p.get('link', 'https://github.com/hdm-shop/tools')}\n\n"
+                f"🔗 Link tool:\n{p.get('link', 'Chưa có link')}\n\n"
                 f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b>🍀🍀🍀",
                 parse_mode='HTML'
             )
@@ -816,7 +792,7 @@ def auto_deliver(order_code, order):
                 f"✅ <b>GIAO HÀNG THÀNH CÔNG</b>\n\n"
                 f"🛍 SP: {esc(p['name'])}\n"
                 f"🔖 Mã: <code>{order_code}</code>\n\n"
-                f"🔗 Link tài liệu:\n{p.get('link', 'https://drive.google.com/hdm-tuts')}\n\n"
+                f"🔗 Link tài liệu:\n{p.get('link', 'Chưa có link')}\n\n"
                 f"🍀🍀🍀 <b>CHÚC ANH EM MAY MẮN</b>🍀🍀🍀",
                 parse_mode='HTML'
             )
@@ -842,7 +818,6 @@ def auto_deliver(order_code, order):
                 f"⚠️ Gõ /cancel để huỷ",
                 parse_mode='HTML'
             )
-
         order['status'] = 'completed'
         order['completed_at'] = datetime.now().isoformat()
         db['orders'].append(order)
@@ -869,9 +844,11 @@ def handle_bill_photo(msg):
         bot.send_message(chat_id, '❌ Không có đơn chờ!')
         return
     oid, order = user_order
+    title = order.get('product_name', order.get('type', 'N/A'))
+    price = order.get('price', order.get('amount', 0))
     bot.send_photo(
         ADMIN_ID, photo_id,
-        caption=f"🧾 <b>BILL</b>\n\n🔖 Mã: {oid}\n@{esc(order['username'])}\n🛍 SP: {esc(order.get('product_name', order.get('type', 'N/A')))}\n💰 Tiền: {order.get('price', order.get('amount', 0)):,}đ",
+        caption=f"🧾 <b>BILL</b>\n\n🔖 Mã: {oid}\n@{esc(order['username'])}\n🛍 {esc(title)}\n💰 {price:,}đ",
         parse_mode='HTML',
         reply_markup=types.InlineKeyboardMarkup().add(
             types.InlineKeyboardButton('📤 GỬI HÀNG', callback_data=f'manual_{oid}'),
@@ -889,7 +866,6 @@ def admin_manual(call):
     if oid in db['pending']:
         order = db['pending'][oid]
         if order.get('type') == 'nap_tien':
-            # Nạp tay
             uid = str(order['chat_id'])
             if uid in db['users']:
                 db['users'][uid]['balance'] = db['users'][uid].get('balance', 0) + order['amount']
@@ -948,12 +924,10 @@ def sms_input_count(msg):
     except:
         bot.send_message(chat_id, "❌ Phải là số! Nhập lại:")
         return
-
     data = sms_waiting[chat_id]
     phone = data['phone']
     order_code = data['order_code']
     del sms_waiting[chat_id]
-
     bot.send_message(
         chat_id,
         f"🚀 <b>ĐANG CHẠY TOOL SPAM SMS</b>\n\n"
@@ -962,7 +936,6 @@ def sms_input_count(msg):
         f"⏳ Đợi 1-5 phút...",
         parse_mode='HTML'
     )
-
     def run_tool():
         try:
             start = time.time()
@@ -986,13 +959,8 @@ def sms_input_count(msg):
             bot.send_message(ADMIN_ID, f"✅ Đơn {order_code}: {phone} x{count}")
         except Exception as e:
             print(f"[SMS TOOL ERROR] {e}")
-            bot.send_message(
-                chat_id,
-                f"❌ <b>LỖI TOOL</b>\n\n❗ {esc(str(e))}\n\nLH: {esc(TELEGRAM_SUPPORT)}",
-                parse_mode='HTML'
-            )
+            bot.send_message(chat_id, f"❌ <b>LỖI TOOL</b>\n\n❗ {esc(str(e))}\n\nLH: {esc(TELEGRAM_SUPPORT)}", parse_mode='HTML')
             bot.send_message(ADMIN_ID, f"❌ Lỗi đơn {order_code}: {e}")
-
     threading.Thread(target=run_tool, daemon=True).start()
 
 # ========== CANCEL ==========
@@ -1079,7 +1047,7 @@ def admin_panel(msg):
     if msg.chat.id != ADMIN_ID:
         return
     db = load_db()
-    total = sum(o['price'] for o in db['orders'] if o['status'] == 'completed' and 'price' in o)
+    total = sum(o.get('price', 0) for o in db['orders'] if o.get('status') == 'completed')
     total_balance = sum(u.get('balance', 0) for u in db['users'].values())
     sms_status = "✅ ONLINE" if SMS_TOOL_AVAILABLE else "❌ OFFLINE"
     bot.send_message(
@@ -1094,9 +1062,15 @@ def admin_panel(msg):
         f"📱 Tool SMS: {sms_status}\n\n"
         f"📌 <b>SP:</b>\n"
         f"<code>/addproduct |pid|ten|gia|loai|mo_ta|link|</code>\n"
+        f"Loại: <code>account</code> / <code>tool</code> / <code>tut</code> / <code>tool_sms</code>\n"
         f"<code>/setprice &lt;pid&gt; &lt;gia&gt;</code>\n"
+        f"<code>/setlink &lt;pid&gt; &lt;link&gt;</code> — tut/tool\n"
+        f"<code>/settut &lt;pid&gt; &lt;link&gt;</code> — chỉ tut\n"
+        f"<code>/settool &lt;pid&gt; &lt;link&gt;</code> — chỉ tool\n"
+        f"<code>/info &lt;pid&gt;</code> — xem chi tiết\n"
         f"<code>/delproduct &lt;pid&gt;</code>\n"
-        f"<code>/delall confirm</code>\n"
+        f"<code>/delall confirm</code>\n\n"
+        f"📌 <b>ACC (chỉ account):</b>\n"
         f"<code>/addacc &lt;pid&gt; &lt;acc&gt;</code>\n"
         f"<code>/addlist &lt;pid&gt;</code> + list\n"
         f"<code>/genacc &lt;pid&gt; &lt;so_luong&gt;</code>\n"
@@ -1139,14 +1113,33 @@ def admin_addproduct(msg):
         if pid in db['products']:
             bot.send_message(ADMIN_ID, f"❌ PID <code>{esc(pid)}</code> đã tồn tại!", parse_mode='HTML')
             return
-        db['products'][pid] = {'name': name, 'price': price, 'stock': 0 if ptype == 'account' else 999, 'type': ptype, 'desc': desc, 'link': link}
+        stock = 0 if ptype == 'account' else -1  # -1 = vô hạn
+        db['products'][pid] = {
+            'name': name,
+            'price': price,
+            'stock': stock,
+            'type': ptype,
+            'desc': desc,
+            'link': link
+        }
         if ptype == 'account':
             db['inventory'][pid] = []
         save_db(db)
-        bot.send_message(ADMIN_ID, f"✅ <b>ĐÃ THÊM SP</b>\n\nPID: <code>{esc(pid)}</code>\nTên: {esc(name)}\nGiá: {price:,}đ\nLoại: {ptype}", parse_mode='HTML')
+        stock_display = "Vô hạn" if stock == -1 else stock
+        bot.send_message(
+            ADMIN_ID,
+            f"✅ <b>ĐÃ THÊM SP</b>\n\n"
+            f"PID: <code>{esc(pid)}</code>\n"
+            f"Tên: {esc(name)}\n"
+            f"Giá: {price:,}đ\n"
+            f"Loại: {ptype}\n"
+            f"Stock: {stock_display}",
+            parse_mode='HTML'
+        )
     except Exception as e:
         bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
 
+# ========== SET PRICE ==========
 @bot.message_handler(commands=['setprice'])
 def admin_setprice(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1166,6 +1159,158 @@ def admin_setprice(msg):
     except:
         bot.send_message(ADMIN_ID, "📌 <code>/setprice &lt;pid&gt; &lt;gia&gt;</code>", parse_mode='HTML')
 
+# ========== SET LINK (chung cho tut/tool/tool_sms) ==========
+@bot.message_handler(commands=['setlink'])
+def admin_setlink(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = msg.text.split(maxsplit=2)
+        if len(parts) < 3:
+            bot.send_message(
+                ADMIN_ID,
+                "📌 <b>Dùng:</b> <code>/setlink &lt;pid&gt; &lt;link&gt;</code>\n\n"
+                "<b>VD:</b>\n"
+                "<code>/setlink tut1 https://drive.google.com/abc</code>\n"
+                "<code>/setlink tool1 https://github.com/abc</code>",
+                parse_mode='HTML'
+            )
+            return
+        pid = parts[1].strip()
+        link = parts[2].strip()
+        db = load_db()
+        if pid not in db['products']:
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> không tồn tại!", parse_mode='HTML')
+            return
+        p = db['products'][pid]
+        if p['type'] == 'account':
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> là <b>account</b>!\nDùng <code>/addacc</code> hoặc <code>/addlist</code>", parse_mode='HTML')
+            return
+        old_link = p.get('link', '')
+        p['link'] = link
+        save_db(db)
+        bot.send_message(
+            ADMIN_ID,
+            f"✅ <b>ĐÃ CẬP NHẬT LINK</b>\n\n"
+            f"🛍 SP: {esc(p['name'])}\n"
+            f"📦 Loại: {p['type']}\n"
+            f"🆔 PID: <code>{esc(pid)}</code>\n"
+            f"🔗 Link cũ: <code>{esc(old_link[:60])}</code>\n"
+            f"🔗 Link mới: <code>{esc(link[:80])}</code>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
+# ========== SET TUT ==========
+@bot.message_handler(commands=['settut'])
+def admin_settut(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = msg.text.split(maxsplit=2)
+        if len(parts) < 3:
+            bot.send_message(
+                ADMIN_ID,
+                "📌 <b>Dùng:</b> <code>/settut &lt;pid&gt; &lt;link&gt;</code>\n\n"
+                "<b>VD:</b> <code>/settut tut1 https://drive.google.com/file/abc</code>",
+                parse_mode='HTML'
+            )
+            return
+        pid = parts[1].strip()
+        link = parts[2].strip()
+        db = load_db()
+        if pid not in db['products']:
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> không tồn tại!", parse_mode='HTML')
+            return
+        p = db['products'][pid]
+        if p['type'] != 'tut':
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> không phải loại <b>tut</b>!\nLoại: {p['type']}", parse_mode='HTML')
+            return
+        old_link = p.get('link', '')
+        p['link'] = link
+        save_db(db)
+        bot.send_message(
+            ADMIN_ID,
+            f"✅ <b>ĐÃ CẬP NHẬT LINK TUT</b>\n\n"
+            f"🛍 SP: {esc(p['name'])}\n"
+            f"🆔 PID: <code>{esc(pid)}</code>\n"
+            f"🔗 Link mới: <code>{esc(link[:80])}</code>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
+# ========== SET TOOL ==========
+@bot.message_handler(commands=['settool'])
+def admin_settool(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = msg.text.split(maxsplit=2)
+        if len(parts) < 3:
+            bot.send_message(
+                ADMIN_ID,
+                "📌 <b>Dùng:</b> <code>/settool &lt;pid&gt; &lt;link&gt;</code>\n\n"
+                "<b>VD:</b> <code>/settool tool1 https://github.com/user/tool</code>",
+                parse_mode='HTML'
+            )
+            return
+        pid = parts[1].strip()
+        link = parts[2].strip()
+        db = load_db()
+        if pid not in db['products']:
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> không tồn tại!", parse_mode='HTML')
+            return
+        p = db['products'][pid]
+        if p['type'] != 'tool':
+            bot.send_message(ADMIN_ID, f"❌ SP <code>{esc(pid)}</code> không phải loại <b>tool</b>!\nLoại: {p['type']}", parse_mode='HTML')
+            return
+        old_link = p.get('link', '')
+        p['link'] = link
+        save_db(db)
+        bot.send_message(
+            ADMIN_ID,
+            f"✅ <b>ĐÃ CẬP NHẬT LINK TOOL</b>\n\n"
+            f"🛍 SP: {esc(p['name'])}\n"
+            f"🆔 PID: <code>{esc(pid)}</code>\n"
+            f"🔗 Link mới: <code>{esc(link[:80])}</code>",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
+# ========== INFO ==========
+@bot.message_handler(commands=['info'])
+def admin_info(msg):
+    if msg.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = msg.text.split()
+        if len(parts) < 2:
+            bot.send_message(ADMIN_ID, "📌 <code>/info &lt;pid&gt;</code>", parse_mode='HTML')
+            return
+        pid = parts[1].strip()
+        db = load_db()
+        if pid not in db['products']:
+            bot.send_message(ADMIN_ID, f"❌ Không tìm thấy <code>{esc(pid)}</code>", parse_mode='HTML')
+            return
+        p = db['products'][pid]
+        stock_display = "Vô hạn" if p.get('stock', 0) == -1 else p.get('stock', 0)
+        text = (
+            f"🛍 <b>{esc(p['name'])}</b>\n\n"
+            f"🆔 PID: <code>{esc(pid)}</code>\n"
+            f"📦 Loại: <b>{p['type']}</b>\n"
+            f"💰 Giá: <b>{p['price']:,}đ</b>\n"
+            f"📊 Stock: <b>{stock_display}</b>\n"
+            f"📝 Mô tả: {esc(p.get('desc', ''))}\n"
+            f"🔗 Link: <code>{esc(p.get('link', 'Chưa có')[:100])}</code>"
+        )
+        bot.send_message(ADMIN_ID, text, parse_mode='HTML')
+    except Exception as e:
+        bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
+
+# ========== DEL PRODUCT ==========
 @bot.message_handler(commands=['delproduct'])
 def admin_delproduct(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1185,6 +1330,7 @@ def admin_delproduct(msg):
     except:
         bot.send_message(ADMIN_ID, "📌 <code>/delproduct &lt;pid&gt;</code>", parse_mode='HTML')
 
+# ========== DEL ALL ==========
 @bot.message_handler(commands=['delall'])
 def admin_delall(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1203,6 +1349,7 @@ def admin_delall(msg):
     save_db(db)
     bot.send_message(ADMIN_ID, f"✅ Đã xoá: {n_prod} SP, {n_inv} acc, {n_pending} đơn chờ", parse_mode='HTML')
 
+# ========== ADD ACC ==========
 @bot.message_handler(commands=['addacc'])
 def admin_addacc(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1224,6 +1371,7 @@ def admin_addacc(msg):
     except:
         bot.send_message(ADMIN_ID, "📌 <code>/addacc &lt;pid&gt; &lt;acc&gt;</code>", parse_mode='HTML')
 
+# ========== ADD LIST ==========
 @bot.message_handler(commands=['addlist'])
 def admin_addlist(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1263,6 +1411,7 @@ def admin_addlist(msg):
     except Exception as e:
         bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
 
+# ========== GEN ACC ==========
 @bot.message_handler(commands=['genacc'])
 def admin_genacc(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1295,6 +1444,7 @@ def admin_genacc(msg):
     except Exception as e:
         bot.send_message(ADMIN_ID, f"❌ Lỗi: {e}")
 
+# ========== KHO ==========
 @bot.message_handler(commands=['kho'])
 def admin_kho(msg):
     if msg.chat.id != ADMIN_ID:
@@ -1360,24 +1510,10 @@ def admin_addmoney(msg):
         new_balance = db['users'][uid]['balance']
         save_db(db)
         try:
-            bot.send_message(
-                int(uid),
-                f"💰 <b>BẠN ĐƯỢC CỘNG TIỀN</b>\n\n"
-                f"💵 Số tiền: <b>+{amount:,}đ</b>\n"
-                f"💰 Số dư mới: <b>{new_balance:,}đ</b>",
-                parse_mode='HTML'
-            )
+            bot.send_message(int(uid), f"💰 <b>BẠN ĐƯỢC CỘNG TIỀN</b>\n\n💵 Số tiền: <b>+{amount:,}đ</b>\n💰 Số dư mới: <b>{new_balance:,}đ</b>", parse_mode='HTML')
         except Exception as e:
             print(f"Noti user error: {e}")
-        bot.send_message(
-            ADMIN_ID,
-            f"✅ <b>ĐÃ CỘNG TIỀN</b>\n\n"
-            f"👤 <code>{uid}</code> ({esc(db['users'][uid].get('name', 'N/A'))})\n"
-            f"💰 Trước: {old_balance:,}đ\n"
-            f"➕ <b>+{amount:,}đ</b>\n"
-            f"💵 Sau: <b>{new_balance:,}đ</b>",
-            parse_mode='HTML'
-        )
+        bot.send_message(ADMIN_ID, f"✅ <b>ĐÃ CỘNG TIỀN</b>\n\n👤 <code>{uid}</code> ({esc(db['users'][uid].get('name', 'N/A'))})\n💰 Trước: {old_balance:,}đ\n➕ <b>+{amount:,}đ</b>\n💵 Sau: <b>{new_balance:,}đ</b>", parse_mode='HTML')
     except ValueError:
         bot.send_message(ADMIN_ID, "❌ Số tiền phải là số nguyên!")
     except Exception as e:
@@ -1599,7 +1735,8 @@ def admin_stats(msg):
     text = "📊 <b>THỐNG KÊ</b>\n\n"
     for pid, p in db['products'].items():
         sold = sum(1 for o in db['orders'] if o.get('product_id') == pid and o.get('status') == 'completed')
-        text += f"🛍 <b>{esc(p['name'])}</b>\n   💰 {p['price']:,}đ | ✅ {sold} | 📦 {p['stock']}\n"
+        stock_display = "∞" if p.get('stock', 0) == -1 else p.get('stock', 0)
+        text += f"🛍 <b>{esc(p['name'])}</b>\n   💰 {p['price']:,}đ | ✅ {sold} | 📦 {stock_display}\n"
     total = sum(o.get('price', 0) for o in db['orders'] if o.get('status') == 'completed')
     total_balance = sum(u.get('balance', 0) for u in db['users'].values())
     total_nap = sum(n.get('amount', 0) for n in db.get('nap_history', []))
